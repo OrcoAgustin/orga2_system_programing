@@ -70,4 +70,15 @@ void screen_draw_box(uint32_t fInit, uint32_t cInit, uint32_t fSize,
 }
 
 void screen_draw_layout(void) {
+  //limpiamos la pantalla
+  screen_draw_box(0, 0, VIDEO_FILS, VIDEO_COLS, ' ', 0x00);
+
+  //escribo el nombre
+  ca(*p)[VIDEO_COLS] = (ca(*)[VIDEO_COLS])VIDEO;
+  const char *nombre = "Agustin Orco";
+  uint32_t i;
+  for (i = 0; nombre[i] != '\0'; i++) {
+    p[1][i].c = nombre[i];
+    p[1][i].a = 0x0A;  // letra blanca sobre fondo negro
+  }
 }
