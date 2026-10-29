@@ -5,6 +5,10 @@
 extern A20_enable
 extern GDT_DESC
 extern screen_draw_layout
+extern idt_init
+extern IDT_DESC
+extern pic_reset
+extern pic_enable
 
 %define C_FG_GREEN 0x2
 %define KERNEL_STACK 0x00025000
@@ -141,13 +145,24 @@ modo_protegido:
     ; ||   (Parte 2: Interrupciones)   ||
     ; ===================================
 
-    ; COMPLETAR - las funciones en idt.c
+    ; COMPLETADO - las funciones en idt.c
 
-    ; COMPLETAR - Inicializar y cargar la IDT
+    ; COMPLETADO- Inicializar y cargar la IDT
 
-    ; COMPLETAR - Reiniciar y habilitar el controlador de interrupciones (ver pic.c)
+    call idt_init
+    lidt [IDT_DESC]
 
-    ; COMPLETAR - Rutinas de atención de reloj, teclado, e interrupciones 88 y 89 (en isr.asm)
+    ; COMPLETADO- Reiniciar y habilitar el controlador de interrupciones (ver pic.c)
+
+    call pic_reset
+    call pic_enable
+
+    sti 
+
+    ; COMPLETADO - Rutinas de atención de reloj, teclado, e interrupciones 88 y 89 (en isr.asm)
+
+    mov eax,0
+    int 88
 
     ; COMPLETAR (Parte 4: Tareas)- Cargar tarea inicial
 

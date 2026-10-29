@@ -114,3 +114,38 @@ attr: el byte de atributos (color de fondo y de letra).
 
 convierte la memoria de video en una matriz, 
 así podés escribir p[fila][columna] en vez de calcular offsets a mano.
+
+
+
+
+PARTE 2: interrupciones
+
+2.1
+pic Inicialización del PIC (pic_reset)
+
+El PIC es el controlador que recibe las interrupciones de hardware (reloj, teclado, etc.) y se las pasa a la CPU con un número de interrupción. Hay dos en cascada: el PIC1 (maestro) atiende las IRQ 0 a 7 y el PIC2 (esclavo) las IRQ 8 a 15, conectado a la IRQ2 del PIC1.
+
+Por defecto el PIC1 mapea sus IRQ en las interrupciones 8 a 15, que colisionan con las excepciones de la CPU (por ejemplo, el 8 es Double Fault y el 13 es #GP). Por eso hay que remapearlo: el PIC1 pasa a usar las interrupciones 32 a 39 (0x20 a 0x27) y el PIC2 las 40 a 47 (0x28 a 0x2F). Así el reloj (IRQ0) queda en la interrupción 32 y el teclado (IRQ1) en la 33.
+
+Para esto se le envían a cada PIC cuatro palabras de configuración (ICW), en orden y sin escrituras intermedias:
+
+ICW1 (puerto de comando, 0x11): inicia la inicialización, modo cascada, e indica que se enviará ICW4.
+ICW2 (puerto de datos, 0x20 / 0x28): offset base de las interrupciones, que es el remapeo.
+ICW3 (puerto de datos, 0x04 en PIC1 / 0x02 en PIC2): configuración de la cascada. El PIC1 recibe una máscara que indica que su esclavo está en la IRQ2, y el PIC2 recibe el número de IRQ del maestro al que está conectado.
+ICW4 (puerto de datos, 0x01): modo 8086.
+
+Al final se escribe la máscara de interrupciones (0xFF), que deja todas las IRQ deshabilitadas hasta que se llame a pic_enable.
+
+2.2 llamas a las f y listo
+
+2.3
+Prólogo: pushad, que guarda en la pila todos los registros de propósito general (eax, ecx, edx, ebx, esp, ebp, esi, edi).
+Epílogo: popad, que los restaura antes de volver.
+Esto es necesario porque next_clock y pic_finish1 pueden tocar registros que necesitamos
+el iret marca el final de la interrupcion y vuelve a donde cortamos la tarea , el ret vuelve a antes
+el iret devuelve el estado de la mquina al previo a la interrupcion
+eip: dirección de la instrucción donde se interrumpió.
+cs: segmento de código.
+eflags: registro de flags, que incluye el bit IF, que la interrupt gate había deshabilitado al entrar.
+Si hubo cambio de nivel de privilegio (por ejemplo, de nivel 3 a nivel 0), también esp y ss.
+ret solo restaura el eip

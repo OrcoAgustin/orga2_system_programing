@@ -22,6 +22,19 @@ void pic_finish2(void) {
 
 // COMPLETAR: implementar pic_reset()
 void pic_reset() {
+// PIC1
+  outb(PIC1_PORT + 0, 0x11);  // ICW1
+  outb(PIC1_PORT + 1, 0x20);  // ICW2: offset 32
+  outb(PIC1_PORT + 1, 0x04);  // ICW3: esclavo en IRQ2
+  outb(PIC1_PORT + 1, 0x01);  // ICW4: modo 8086
+  outb(PIC1_PORT + 1, 0xFF);  // máscara: todo deshabilitado
+
+  // PIC2
+  outb(PIC2_PORT + 0, 0x11);  // ICW1
+  outb(PIC2_PORT + 1, 0x28);  // ICW2: offset 40
+  outb(PIC2_PORT + 1, 0x02);  // ICW3: identidad de cascada
+  outb(PIC2_PORT + 1, 0x01);  // ICW4: modo 8086
+  outb(PIC2_PORT + 1, 0xFF);  // máscara: todo deshabilitado
 }
 
 void pic_enable() {
