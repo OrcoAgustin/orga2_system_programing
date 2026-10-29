@@ -29,6 +29,7 @@ extern tasks_syscall_draw
 extern tasks_input_process
 extern tasks
 extern current_task
+extern process_scancode
 
 ;; Definición de MACROS
 ;; -------------------------------------------------------------------------- ;;

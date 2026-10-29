@@ -1,0 +1,187 @@
+1)Explorando el manual Intel Volumen 3: System Programming. Sección 2.2 Modes of Operation. 
+¿A qué nos referimos con modo real y con modo protegido en un procesador Intel? 
+¿Qué particularidades tiene cada modo?
+
+son 2 modos de procesamiento de un perocesador
+el modo protegido es el estado nativo del proce, no te deja rompr nada.
+te deja todo el uso de la memoria virtual, paginacion y los 4 niveles de privilegio (0 a 3 entre mas bajo
+mas poder)
+
+el modo real tiene una limitacion de memoria a un megabyte y replica el estado de v del 8086
+por defecto arranca en este modo el proce 
+
+
+2)Comenten en su equipo, ¿Por qué debemos hacer el pasaje de modo real a modo protegido? 
+¿No podríamos simplemente tener un sistema operativo en modo real? ¿Qué desventajas tendría?
+
+primero que tenes limitado el direccionamiento, segundo que podes romper algo
+
+
+3)Busquen el manual volumen 3 de Intel en la sección 3.4.5 Segment Descriptors. ¿Qué es la GDT?
+¿Cómo es el formato de un descriptor de segmento, bit a bit? 
+Expliquen brevemente para qué sirven los campos Limit, Base, G, P, DPL, S. 
+También pueden referirse a los slides de la clase teórica, aunque recomendamos que se acostumbren a 
+consultar el manual.
+
+gdt, global descriptor table
+
+limit: 
+    Specifies the size of the segment. The processor puts together the two segment limit fields to form 
+    a 20-bit value. The processor interprets the segment limit in one of two ways, depending on the 
+    setting of the G (granularity) flag:
+    • If the granularity flag is clear, the segment size can range from 1 byte to 1 MByte, in byte incre
+    ments.
+    • If the granularity flag is set, the segment size can range from 4 KBytes to 4 GBytes, in 4-KByte 
+    increments.
+    The processor uses the segment limit in two different ways, depending on whether the segment is 
+    an expand-up or an expand-down segment. See Section 3.4.5.1, “Code- and Data-Segment 
+    Descriptor Types,” for more information about segment types. For expand-up segments, the offset 
+    in a logical address can range from 0 to the segment limit. Offsets greater than the segment limit 
+    generate general-protection exceptions (#GP, for all segments other than SS) or stack-fault excep
+    tions (#SS for the SS segment). For expand-down segments, the segment limit has the reverse 
+    function; the offset can range from the segment limit plus 1 to FFFFFFFFH or FFFFH, depending on 
+    the setting of the B flag. Offsets less than or equal to the segment limit generate general-protection 
+    exceptions or stack-fault exceptions. Decreasing the value in the segment limit field for an expand
+    down segment allocates new memory at the bottom of the segment's address space, rather than at 
+    the top. IA-32 architecture stacks always grow downwards, making this mechanism convenient for 
+    expandable stacks.
+
+Base:
+    Defines the location of byte 0 of the segment within the 4-GByte linear address space. The 
+    processor puts together the three base address fields to form a single 32-bit value. Segment base 
+    addresses should be aligned to 16-byte boundaries. Although 16-byte alignment is not required, 
+    this alignment allows programs to maximize performance by aligning code and data on 16-byte 
+    boundaries.
+
+G:
+    Determines the scaling of the segment limit field. When the granularity flag is clear, the segment 
+    limit is interpreted in byte units; when flag is set, the segment limit is interpreted in 4-KByte units. 
+    (This flag does not affect the granularity of the base address; it is always byte granular.) When the 
+    granularity flag is set, the twelve least significant bits of an offset are not tested when checking the 
+    offset against the segment limit. For example, when the granularity flag is set, a limit of 0 results in 
+    valid offsets from 0 to 4095.
+
+P:
+    Indicates whether the segment is present in memory (set) or not present (clear). If this flag is clear, 
+    the processor generates a segment-not-present exception (#NP) when a segment selector that 
+    points to the segment descriptor is loaded into a segment register. Memory management software 
+    can use this flag to control which segments are actually loaded into physical memory at a given 
+    time. It offers a control in addition to paging for managing virtual memory.
+    Figure 3-9 shows the format of a segment descriptor when the segment-present flag is clear. When 
+    this flag is clear, the operating system or executive is free to use the locations marked “Available” to 
+    store its own data, such as information regarding the whereabouts of the missing segment.
+
+DPL:
+    Specifies the privilege level of the segment. The privilege level can range from 0 to 3, with 0 being 
+    the most privileged level. The DPL is used to control access to the segment. See Section 5.5, “Priv
+    ilege Levels,” for a description of the relationship of the DPL to the CPL of the executing code 
+    segment and the RPL of a segment selector.
+
+S:
+    Specifies whether the segment descriptor is for a system segment (S flag is clear) or a code or data 
+    segment (S flag is set).
+
+
+4)La tabla de la sección 3.4.5.1 Code- and Data-Segment Descriptor Types del volumen 3 del manual 
+del Intel nos permite completar el Type, los bits 11, 10, 9, 8. 
+¿Qué combinación de bits tendríamos que usar si queremos especificar un segmento 
+para ejecución y lectura de código?
+
+1010
+
+5) nada
+6)En el archivo gdt.h observen las estructuras: struct gdt_descriptor_t y el struct gdt_entry_t. 
+¿Qué creen que contiene la variable extern gdt_entry_t gdt; y extern gdt_descriptor_t GDT_DESC;?
+
+str_gdt_descriptor
+tiene el largo de la descripcion y donde arranca
+
+gdt_entry_t 
+tiene los datos que vimos antes de una entrada de la gdt
+
+7)
+
+21)el recuento es 50x80x2 bytes=8000 bytes
+el limit es 7999 
+arranca en 0x000B8000`[^3]
+
+
+22)
+fInit, cInit: fila y columna de la esquina superior izquierda.
+fSize, cSize: alto (filas) y ancho (columnas) del rectángulo.
+character: el carácter ASCII con el que rellena cada celda.
+attr: el byte de atributos (color de fondo y de letra).
+
+convierte la memoria de video en una matriz, 
+así podés escribir p[fila][columna] en vez de calcular offsets a mano.
+
+
+
+
+PARTE 2: interrupciones
+
+2.1
+pic Inicialización del PIC (pic_reset)
+
+El PIC es el controlador que recibe las interrupciones de hardware (reloj, teclado, etc.) y se las pasa a la CPU con un número de interrupción. Hay dos en cascada: el PIC1 (maestro) atiende las IRQ 0 a 7 y el PIC2 (esclavo) las IRQ 8 a 15, conectado a la IRQ2 del PIC1.
+
+Por defecto el PIC1 mapea sus IRQ en las interrupciones 8 a 15, que colisionan con las excepciones de la CPU (por ejemplo, el 8 es Double Fault y el 13 es #GP). Por eso hay que remapearlo: el PIC1 pasa a usar las interrupciones 32 a 39 (0x20 a 0x27) y el PIC2 las 40 a 47 (0x28 a 0x2F). Así el reloj (IRQ0) queda en la interrupción 32 y el teclado (IRQ1) en la 33.
+
+Para esto se le envían a cada PIC cuatro palabras de configuración (ICW), en orden y sin escrituras intermedias:
+
+ICW1 (puerto de comando, 0x11): inicia la inicialización, modo cascada, e indica que se enviará ICW4.
+ICW2 (puerto de datos, 0x20 / 0x28): offset base de las interrupciones, que es el remapeo.
+ICW3 (puerto de datos, 0x04 en PIC1 / 0x02 en PIC2): configuración de la cascada. El PIC1 recibe una máscara que indica que su esclavo está en la IRQ2, y el PIC2 recibe el número de IRQ del maestro al que está conectado.
+ICW4 (puerto de datos, 0x01): modo 8086.
+
+Al final se escribe la máscara de interrupciones (0xFF), que deja todas las IRQ deshabilitadas hasta que se llame a pic_enable.
+
+2.2 llamas a las f y listo
+
+2.3
+Prólogo: pushad, que guarda en la pila todos los registros de propósito general (eax, ecx, edx, ebx, esp, ebp, esi, edi).
+Epílogo: popad, que los restaura antes de volver.
+Esto es necesario porque next_clock y pic_finish1 pueden tocar registros que necesitamos
+el iret marca el final de la interrupcion y vuelve a donde cortamos la tarea , el ret vuelve a antes
+el iret devuelve el estado de la mquina al previo a la interrupcion
+eip: dirección de la instrucción donde se interrumpió.
+cs: segmento de código.
+eflags: registro de flags, que incluye el bit IF, que la interrupt gate había deshabilitado al entrar.
+Si hubo cambio de nivel de privilegio (por ejemplo, de nivel 3 a nivel 0), también esp y ss.
+ret solo restaura el eip
+
+parte 3:interrupciones
+
+manejo de memoria 
+Ya viendo la memoria física en forma más general, vemos que se divide
+en: *kernel*, *área libre kernel* y *área libre tareas*.
+
+El área asociada al *kernel* corresponde al primer MB de memoria, el
+*área libre kernel* a los siguientes 3 MB, y el *área libre tareas*
+comienza en el cuarto MB de memoria.
+
+La administración de las áreas libres de memoria (área libre de kernel y
+área libre de tareas) se realizará a partir de una región de memoria
+específica para cada una. Podemos comprenderlas como un arreglo
+predefinido de páginas y dos contadores de páginas, uno para kernel y
+otro para usuarix, que indican cuál será la próxima página a emplear de
+cada región. Para páginas de kernel el arreglo va de `0x100000` a
+`0x3FFFFF` y para páginas de usuarix de `0x400000` a `0x2FFFFFF`. Luego
+de cada pedido incrementamos el contador correspondiente. En el
+contexto de la materia no implementaremos un mecanismo que permita liberar
+las páginas pedidas. Vamos a referirnos al módulo que implementa este
+mecanismo como la **unidad de manejo de memoria**, o en inglés, *memory
+management unit*, MMU.
+
+1,a)
+2, admin y user 
+    Las estructuras de paginación (PDE y PTE) tienen un solo bit para esto, el U/S (User/Supervisor):
+
+U/S = 0: supervisor. Solo accede código con CPL 0, 1 o 2.
+U/S = 1: usuario. Acceden todos los niveles, incluido el CPL 3.
+
+La CPU agrupa los 4 anillos en dos categorías: los niveles 0, 1 y 2 cuentan como “supervisor” y el 3 como “usuario”.
+
+Los 4 niveles (0 a 3) los tenés en la segmentación: el DPL de los descriptores de la GDT y de la IDT, y el CPL/RPL de los selectores. Es fácil confundirlos porque en el TP vos usás solo el 0 y el 3.
+
+Si la consigna pide explicar cómo se combina con los permisos, el chequeo se hace en los dos niveles de la tabla (PDE y PTE) y gana el más restrictivo. Para que una tarea de usuario acceda a una página, el bit U/S tiene que estar en 1 en ambas entradas. Lo mismo pasa con R/W para escritura.
