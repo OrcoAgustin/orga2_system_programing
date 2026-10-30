@@ -185,3 +185,24 @@ La CPU agrupa los 4 anillos en dos categorías: los niveles 0, 1 y 2 cuentan com
 Los 4 niveles (0 a 3) los tenés en la segmentación: el DPL de los descriptores de la GDT y de la IDT, y el CPL/RPL de los selectores. Es fácil confundirlos porque en el TP vos usás solo el 0 y el 3.
 
 Si la consigna pide explicar cómo se combina con los permisos, el chequeo se hace en los dos niveles de la tabla (PDE y PTE) y gana el más restrictivo. Para que una tarea de usuario acceda a una página, el bit U/S tiene que estar en 1 en ambas entradas. Lo mismo pasa con R/W para escritura.
+
+1,b)
+
+    La dirección lógica es un selector más un offset. El selector te manda a un descriptor de la GDT, que dice dónde arranca el segmento (la base). La CPU suma base + offset y obtiene la dirección lineal
+    La memoria física se corta en bloques de 4 KB (las páginas). La idea es que la dirección lineal no apunta directo a la memoria física, sino que hay que consultar una “agenda” para saber en qué bloque físico está cada página. Esa agenda tiene dos niveles, como un libro con índice de capítulos y, adentro de cada capítulo, un índice de páginas.
+
+    Para eso la CPU parte la dirección lineal de 32 bits en tres pedazos:
+
+    Los 10 bits de arriba dicen “qué capítulo”, o sea qué entrada del directorio.
+    Los 10 bits del medio dicen “qué página dentro del capítulo”, o sea qué entrada de la tabla de páginas.
+    Los 12 bits de abajo dicen “qué línea dentro de la página”, o sea la posición dentro del bloque de 4 KB.
+    Cambiar CR3 cambia toda la agenda de golpe. Por eso cada tarea puede tener su propio CR3 y creer que tiene toda la memoria para ella, aunque físicamente sus páginas estén desparramadas y mezcladas con las de otras. Y como el índice es de dos niveles, no hace falta tener armada una tabla gigante: solo creás las tablas de las zonas que realmente usás.
+
+1,c)
+D (Dirty): la CPU lo pone en 1 la primera vez que se escribe en la página. Le sirve al SO para saber que la página se modificó y que, si la desaloja, tiene que guardarla antes. Solo tiene efecto en la PTE. Lo limpia el SO, nunca la CPU.
+    A (Accessed): la CPU lo pone en 1 la primera vez que se lee o escribe la página. El SO lo usa para saber qué páginas se usaron hace poco (por ejemplo, para elegir cuál desalojar). Lo limpia el SO.
+    PCD (Page Cache Disable): con 1, la página no se cachea y cada acceso va directo a memoria. Se usa para memoria mapeada a dispositivos, donde un valor cacheado sería un valor viejo.
+    PWT (Page Write-Through): define la política de escritura del caché para esa página. Con 1, las escrituras se propagan a memoria al mismo tiempo que se escriben en el caché (write-through). Con 0, la escritura queda en el caché y baja a memoria después (write-back).
+    U/S (User/Supervisor): con 0, solo accede código de supervisor (CPL 0, 1 o 2). Con 1, también accede el nivel de usuario (CPL 3). Un acceso de usuario a una página con U/S = 0 genera #PF.
+    R/W (Read/Write): con 0, la página es de solo lectura. Con 1, se puede leer y escribir. Escribir en una página de solo lectura genera #PF. Para CPL 3 se respeta siempre; para CPL 0 depende del bit WP de CR0.
+    P (Present): con 1, la página está en memoria y la traducción sigue. Con 0, la CPU no traduce y salta #PF. El resto de los bits de la entrada quedan libres para el SO.
