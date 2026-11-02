@@ -173,6 +173,56 @@ las páginas pedidas. Vamos a referirnos al módulo que implementa este
 mecanismo como la **unidad de manejo de memoria**, o en inglés, *memory
 management unit*, MMU.
 
+
+paginacion
+1. El problema que resuelve la paginación
+
+Cada tarea quiere creer que tiene toda la memoria para ella, con direcciones que arrancan en 0. Pero la RAM real es una sola y se comparte. Entonces hay dos mundos:
+
+Direcciones virtuales: las que ve el código de la tarea.
+Direcciones físicas: las posiciones reales en la RAM.
+
+La MMU traduce de virtual a física, y para eso se usa la paginación.
+
+2. Qué es una página
+
+Cortás la memoria en bloques de 4 KB. Un bloque de memoria virtual es una página, y un bloque de RAM real es un marco (o página física). Traducir es decir “esta página virtual vive en este marco físico”.
+
+3. Lo que te estaba confundiendo: una tabla de páginas NO es una página con direcciones adentro de forma suelta
+
+La tabla de páginas es una estructura que ocupa una página de RAM (4 KB), porque justo entran 1024 entradas de 4 bytes. Cada entrada (PTE) dice: “la página virtual número tanto está en este marco físico”, más unos flags (presente, R/W, U/S).
+
+O sea, hay dos tipos de páginas de RAM:
+
+Páginas que contienen datos o código de la tarea.
+Páginas que contienen estructuras de paginación (directorio y tablas).
+
+Las dos ocupan memoria física y las dos hay que pedirlas.
+
+4. Cómo se conecta todo con el CR3
+
+Es una cadena de punteros, todos a direcciones físicas:
+
+CR3 → directorio → tabla de páginas → página de la tarea
+
+CR3 guarda la dirección física del directorio.
+Cada entrada del directorio apunta a una tabla de páginas.
+Cada entrada de la tabla apunta a una página de datos/código.
+
+5. Cómo se traduce una dirección (ejemplo)
+
+Una dirección virtual de 32 bits se parte en tres:
+
+[10 bits: índice en directorio | 10 bits: índice en tabla | 12 bits: offset]
+
+Tomá la dirección 0x00001234:
+
+Índice de directorio = 0
+Índice de tabla = 1
+Offset = 0x234
+
+La MMU hace: va al directorio (CR3), mira la entrada 0 y obtiene la dirección de una tabla. Va a esa tabla, mira la entrada 1 y obtiene el marco físico. Le suma el offset 0x234 y ya tiene la dirección física real.
+
 1,a)
 2, admin y user 
     Las estructuras de paginación (PDE y PTE) tienen un solo bit para esto, el U/S (User/Supervisor):
@@ -199,10 +249,18 @@ Si la consigna pide explicar cómo se combina con los permisos, el chequeo se ha
     Cambiar CR3 cambia toda la agenda de golpe. Por eso cada tarea puede tener su propio CR3 y creer que tiene toda la memoria para ella, aunque físicamente sus páginas estén desparramadas y mezcladas con las de otras. Y como el índice es de dos niveles, no hace falta tener armada una tabla gigante: solo creás las tablas de las zonas que realmente usás.
 
 1,c)
-D (Dirty): la CPU lo pone en 1 la primera vez que se escribe en la página. Le sirve al SO para saber que la página se modificó y que, si la desaloja, tiene que guardarla antes. Solo tiene efecto en la PTE. Lo limpia el SO, nunca la CPU.
+    D (Dirty): la CPU lo pone en 1 la primera vez que se escribe en la página. Le sirve al SO para saber que la página se modificó y que, si la desaloja, tiene que guardarla antes. Solo tiene efecto en la PTE. Lo limpia el SO, nunca la CPU.
     A (Accessed): la CPU lo pone en 1 la primera vez que se lee o escribe la página. El SO lo usa para saber qué páginas se usaron hace poco (por ejemplo, para elegir cuál desalojar). Lo limpia el SO.
     PCD (Page Cache Disable): con 1, la página no se cachea y cada acceso va directo a memoria. Se usa para memoria mapeada a dispositivos, donde un valor cacheado sería un valor viejo.
     PWT (Page Write-Through): define la política de escritura del caché para esa página. Con 1, las escrituras se propagan a memoria al mismo tiempo que se escriben en el caché (write-through). Con 0, la escritura queda en el caché y baja a memoria después (write-back).
     U/S (User/Supervisor): con 0, solo accede código de supervisor (CPL 0, 1 o 2). Con 1, también accede el nivel de usuario (CPL 3). Un acceso de usuario a una página con U/S = 0 genera #PF.
     R/W (Read/Write): con 0, la página es de solo lectura. Con 1, se puede leer y escribir. Escribir en una página de solo lectura genera #PF. Para CPL 3 se respeta siempre; para CPL 0 depende del bit WP de CR0.
     P (Present): con 1, la página está en memoria y la traducción sigue. Con 0, la CPU no traduce y salta #PF. El resto de los bits de la entrada quedan libres para el SO.
+
+1,d)
+    Para que una página sea accesible desde user (CPL 3) tiene que tener U/S=1 en ambos niveles. Para que sea escribible desde user, R/W=1 en ambos. Alcanza con que uno de los dos diga “no” para que el acceso falle con #PF.
+
+Hay un detalle con R/W: lo anterior vale para accesos de usuario. Para accesos en modo supervisor (CPL 0, 1 o 2), si CR0.WP = 0, el kernel puede escribir en páginas read-only igual. Si CR0.WP = 1, también se respeta el R/W en modo supervisor. La tabla del manual (Vol. 3, Combined Page-Directory and Page-Table Protection) lo marca con esa distinción.
+
+1,e)
+    5 páginas: 1 de directorio + 1 de tabla + 3 de memoria (2 de código y 1 de pila). 
