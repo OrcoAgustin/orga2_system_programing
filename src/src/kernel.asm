@@ -9,6 +9,11 @@ extern idt_init
 extern IDT_DESC
 extern pic_reset
 extern pic_enable
+extern mmu_init_kernel_dir  
+extern mmu_init_task_dir
+
+
+;extern test_copy_page
 
 %define C_FG_GREEN 0x2
 %define KERNEL_STACK 0x00025000
@@ -118,8 +123,8 @@ modo_protegido:
     ; ||     (Parte 3: Paginación)     ||
     ; ===================================
 
-    ; COMPLETAR - los defines para la MMU en defines.h
-    ; COMPLETAR - las funciones en mmu.c
+    ; COMPLETADO - los defines para la MMU en defines.h
+    ; COMPLETADO - las funciones en mmu.c
     ; COMPLETAR - reemplazar la implementacion de la interrupcion 88 (ver comentarios en isr.asm)
     ; COMPLETAR - La rutina de atención del page fault en isr.asm
     ; COMPLETAR - Inicializar el directorio de paginas
@@ -156,6 +161,35 @@ modo_protegido:
 
     call pic_reset
     call pic_enable
+
+    ;habilitamos paginacion
+    call mmu_init_kernel_dir     ; arma directorio y tabla, devuelve en EAX la dir. del directorio (0x25000)
+
+    mov cr3, eax                 ; CR3 = dirección física del directorio de páginas
+
+    mov eax, cr0
+    or  eax, 0x80000000          ; bit 31 (PG) = 1 -> activa paginación
+    mov cr0, eax
+
+    ;prueba de copy page
+    ;call test_copy_page
+
+    ; mapa de memoria de una tarea ficticia ---
+    push 0x18000
+    call mmu_init_task_dir
+    add esp, 4
+    mov ebx, eax                     ; ebx = cr3 de la tarea
+
+    mov eax, cr3
+    push eax                         ; guardo el cr3 del kernel en la pila
+
+    mov cr3, ebx                     ; <-- breakpoint 1: info page (mapa de la tarea)
+
+    mov dword [0x07000000], 0x1234   ; 1ra escritura: page fault -> se mapea
+    mov dword [0x07000004], 0x5678   ; 2da escritura: ya está mapeada, sin mensaje
+
+    pop eax
+    mov cr3, eax
 
     sti 
 

@@ -30,6 +30,7 @@ extern tasks_input_process
 extern tasks
 extern current_task
 extern process_scancode
+extern page_fault_handler
 
 ;; Definición de MACROS
 ;; -------------------------------------------------------------------------- ;;
@@ -133,7 +134,7 @@ ISRE 10
 ISRE 11
 ISRE 12
 ISRE 13
-ISRE 14 ; comentar esta línea en la parte 3 (paginación)
+;ISRE 14 ; comentar esta línea en la parte 3 (paginación)
 ISRNE 15
 ISRNE 16
 ISRE 17
@@ -143,12 +144,28 @@ ISRNE 20
 
 ;; Rutina de atención de Page Fault ISRE 14 ; Descomentar esta rutina en la parte 3 (paginación)
 ;; -------------------------------------------------------------------------- ;;
-;global _isr14
+global _isr14
+_isr14:
+    ; Estamos en un page fault.
+    pushad
 
-;_isr14:
-;	add esp, 4 ; error code
-;	iret
+    mov eax, cr2                 ; dirección que se intentó acceder
+    push eax
+    call page_fault_handler      ; devuelve true si lo atendió (área on-demand)
+    add esp, 4
 
+    test al, al
+    jnz .fin                     ; atendido: volver y reintentar la instrucción
+
+  .ring0_exception:
+    ; Acá solo deberíamos llegar si ocurrió un page fault fuera del area compartida.
+    call kernel_exception
+    jmp $
+
+  .fin:
+    popad
+    add esp, 4                   ; error code
+    iret
 ;; Rutina de atención del RELOJ
 ;; -------------------------------------------------------------------------- ;;
 global _isr32
@@ -204,10 +221,12 @@ global _isr88
 ; Para la seccion de interrupciones: que modifique el valor de eax por 0x58
 ; Para las secciones de paginación y tareas: que llame a la funcion task_syscall_draw
 _isr88:
-  ;no esta el pic finish porque es un sys call no una interrupcion por hardware
-  mov eax, 0x58 ;solo tengo que cambiar eax, no hace falta preservar nada
-  iret
-
+  pushad
+push eax
+call tasks_syscall_draw
+add esp, 4
+popad
+iret
 
 ; COMPLETAR: Implementar la rutina
 ; La rutina debe modificar el valor de eax por 0x62

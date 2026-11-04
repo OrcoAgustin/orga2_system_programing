@@ -54,6 +54,9 @@ void mmu_init(void) {}
  * @return devuelve la dirección de memoria de comienzo de la próxima página libre de kernel
  */
 paddr_t mmu_next_free_kernel_page(void) {
+  paddr_t page = next_free_kernel_page;
+  next_free_kernel_page += PAGE_SIZE;
+  return page;
 }
 
 /**
@@ -61,6 +64,9 @@ paddr_t mmu_next_free_kernel_page(void) {
  * @return devuelve la dirección de memoria de comienzo de la próxima página libre de usuarix
  */
 paddr_t mmu_next_free_user_page(void) {
+  paddr_t page = next_free_user_page;
+  next_free_user_page += PAGE_SIZE;
+  return page;
 }
 
 /**
@@ -70,6 +76,18 @@ paddr_t mmu_next_free_user_page(void) {
  * de páginas usado por el kernel
  */
 paddr_t mmu_init_kernel_dir(void) {
+  zero_page((vaddr_t)kpd);
+  zero_page((vaddr_t)kpt);
+
+  kpd[0].attrs = 0x3;   // P | RW, supervisor
+  kpd[0].pt = KERNEL_PAGE_TABLE_0 >> 12;
+
+  for (int i = 0; i < 1024; i++) {
+    kpt[i].attrs = 0x3;
+    kpt[i].page = i;
+  }
+
+  return (paddr_t)kpd;
 }
 
 /**
@@ -81,6 +99,38 @@ paddr_t mmu_init_kernel_dir(void) {
  * @param attrs los atributos a asignar en la entrada de la tabla de páginas
  */
 void mmu_map_page(uint32_t cr3, vaddr_t virt, paddr_t phy, uint32_t attrs) {
+  pd_entry_t* direc = (pd_entry_t*)(cr3 & 0xFFFFF000); /*sacamos los flags de cr3 y nos quedamos solo con la direccion*/
+
+  /*ahora de virt a la entrada directorio*/
+  uint32_t direc_entry = virt>>22; /*los 10 bits mas significativos de virt*/
+
+  /*chequeamos que exista la tabla*/
+  if (!(direc[direc_entry].attrs & 0x1)) {/*si el bit 0 no es 1 quiere decir que el flag present esta clear osea no existe*/
+    // la tabla no existe: hay que crearla
+    paddr_t nueva_tabla = mmu_next_free_kernel_page();   // 1) pedir una página libre
+    zero_page((vaddr_t)nueva_tabla);                     // 2) limpiarla (todas las PTE en no presente)
+    direc[direc_entry].pt = nueva_tabla >> 12;           // 3) enganchar la PDE a esa tabla
+    direc[direc_entry].attrs = MMU_P | MMU_W;            // 4) marcarla presente + escritura
+  }
+
+  direc[direc_entry].attrs |= (attrs & MMU_U);
+
+  /*vamos a la tabla*/
+  pt_entry_t* tabla = (pt_entry_t*)((uint32_t)direc[direc_entry].pt << 12);
+   /*sacamos la direccion de la tabla de paginas*/
+
+  /*ahora de virt a la entrada tabla*/
+  uint32_t tabla_entry = (virt>>12) & 0x3FF; /*los 10 bits menos significativos de virt(descontando el offset obvio)*/
+  
+  /*ahora escribimos la entrada de la tabla*/
+  tabla[tabla_entry].page = phy >> 12;
+  tabla[tabla_entry].attrs = (attrs & 0xFFF) | MMU_P;
+
+  /*ahora flusheas para actualziar todo por que sino
+  ,si esa dirección virtual ya estaba cacheada en la TLB con otra traducción, 
+  la CPU sigue usando la vieja*/
+  tlbflush();
+
 }
 
 /**
@@ -89,6 +139,28 @@ void mmu_map_page(uint32_t cr3, vaddr_t virt, paddr_t phy, uint32_t attrs) {
  * @return la dirección física de la página desvinculada
  */
 paddr_t mmu_unmap_page(uint32_t cr3, vaddr_t virt) {
+/*procedimiento similar al map*/
+pd_entry_t* direc = (pd_entry_t*)(cr3 & 0xFFFFF000); /*sacamos los flags de cr3 y nos quedamos solo con la direccion*/
+
+  /*ahora de virt a la entrada directorio*/
+  uint32_t direc_entry = virt>>22; /*los 10 bits mas significativos de virt*/
+
+  /*el caso if no importa, aca si existe*/
+  /*vamos a la tabla*/
+  pt_entry_t* tabla = (pt_entry_t*)((uint32_t)direc[direc_entry].pt << 12);
+   /*sacamos la direccion de la tabla de paginas*/
+
+  /*ahora de virt a la entrada tabla*/
+  uint32_t tabla_entry = (virt>>12) & 0x3FF; /*los 10 bits menos significativos de virt(descontando el offset obvio)*/
+
+  /*guardamos la direccion fisica de la pagina que vamos a desvincular*/
+  paddr_t phy = tabla[tabla_entry].page << 12;
+
+  tabla[tabla_entry].attrs = 0; /*desvinculamos la tabla de paginas*/
+  tabla[tabla_entry].page = 0; /*desvinculamos la pagina*/
+
+  tlbflush(); /*flusheamos para que no quede cacheada la traduccion vieja*/
+  return phy;
 
 }
 
@@ -104,6 +176,21 @@ paddr_t mmu_unmap_page(uint32_t cr3, vaddr_t virt) {
  * la copia y luego desmapea las páginas. Usar la función rcr3 definida en i386.h para obtener el cr3 actual
  */
 void copy_page(paddr_t dst_addr, paddr_t src_addr) {
+  uint32_t cr3 = rcr3();
+
+  mmu_map_page(cr3, SRC_VIRT_PAGE, src_addr, MMU_P);
+  mmu_map_page(cr3, DST_VIRT_PAGE, dst_addr, MMU_P);
+
+  /*copiamos*/
+  uint8_t* src = (uint8_t*)SRC_VIRT_PAGE;
+  uint8_t* dst = (uint8_t*)DST_VIRT_PAGE;
+  for (size_t i = 0; i < PAGE_SIZE; i++) {
+    dst[i] = src[i];
+  }
+
+  // Cerramos las ventanas
+  mmu_unmap_page(cr3, SRC_VIRT_PAGE);
+  mmu_unmap_page(cr3, DST_VIRT_PAGE);
 }
 
  /**
@@ -112,12 +199,62 @@ void copy_page(paddr_t dst_addr, paddr_t src_addr) {
  * @return el contenido que se ha de cargar en un registro CR3 para la tarea asociada a esta llamada
  */
 paddr_t mmu_init_task_dir(paddr_t phy_start) {
+
+  /*pedimos pagina(CR3)*/
+  paddr_t pd_phys = mmu_next_free_kernel_page();
+
+  /*limpiamos pagina*/
+  zero_page((vaddr_t)pd_phys);
+
+  /*hacemos que la nueva tenga misma config del kernel */
+  pd_entry_t* pd = (pd_entry_t*)pd_phys;
+  pd[0] = kpd[0];
+
+  /*mapeamos las 2 de codigo(solo lecturas y level de user)*/
+  mmu_map_page(pd_phys, 0x08000000, phy_start, MMU_P | MMU_U);
+  mmu_map_page(pd_phys, 0x08001000, phy_start + PAGE_SIZE, MMU_P | MMU_U);
+
+ // Stack: la página está debajo de TASK_STACK_BASE
+  paddr_t stack = mmu_next_free_user_page();
+  mmu_map_page(pd_phys, TASK_STACK_BASE - PAGE_SIZE, stack, MMU_P | MMU_W | MMU_U);
+
+  // Compartida: justo después del stack
+  mmu_map_page(pd_phys, TASK_SHARED_PAGE, SHARED, MMU_P | MMU_W | MMU_U);
+  
+  return pd_phys;
 }
 
 // COMPLETAR: devuelve true si se atendió el page fault y puede continuar la ejecución 
 // y false si no se pudo atender
 bool page_fault_handler(vaddr_t virt) {
   print("Atendiendo page fault...", 0, 0, C_FG_WHITE | C_BG_BLACK);
-  // Chequeemos si el acceso fue dentro del area on-demand
-  // En caso de que si, mapear la pagina
+    // ¿El acceso fue dentro del área on-demand?
+  if (virt >= ON_DEMAND_MEM_START_VIRTUAL && virt <= ON_DEMAND_MEM_END_VIRTUAL) {
+    // Mapear la página como lectura-escritura a nivel usuario
+    mmu_map_page(rcr3(), ON_DEMAND_MEM_START_VIRTUAL, ON_DEMAND_MEM_START_PHYSICAL,
+                 MMU_P | MMU_W | MMU_U);
+    return true;
+  }
+
+  return false;
+}
+
+
+void test_copy_page(void) {
+  // Páginas del área de kernel: están dentro del identity mapping,
+  // así que puedo escribirlas directo por su dirección física
+  paddr_t src = mmu_next_free_kernel_page();
+  paddr_t dst = mmu_next_free_kernel_page();
+
+  uint32_t* s = (uint32_t*)src;
+  uint32_t* d = (uint32_t*)dst;
+  for (int i = 0; i < 1024; i++) {
+    s[i] = 0xCAFE0000 + i;   // patrón distinto en cada palabra
+    d[i] = 0;                // destino limpio
+  }
+
+  copy_page(dst, src);
+
+  // Dejá un lugar para poner el breakpoint
+  __asm__ volatile("nop");
 }

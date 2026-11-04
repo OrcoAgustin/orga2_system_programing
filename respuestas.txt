@@ -264,3 +264,40 @@ Hay un detalle con R/W: lo anterior vale para accesos de usuario. Para accesos e
 
 1,e)
     5 páginas: 1 de directorio + 1 de tabla + 3 de memoria (2 de código y 1 de pila). 
+
+1,g)
+    La TLB (Translation Lookaside Buffer) es una caché chica y rapidísima, dentro de la MMU, que guarda las traducciones dirección virtual → dirección física usadas recientemente.
+    Sin TLB, cada acceso a memoria con paginación de dos niveles costaría 3 accesos: uno al directorio, uno a la tabla de páginas y recién después el acceso real al dato. Con la TLB, si la traducción está (hit), se resuelve en un ciclo o dos sin tocar la memoria. Solo si no está (miss) se hace el page walk completo y se carga la entrada en la TLB.
+
+    ¿Por qué hay que purgarla (tlbflush)?
+
+    Porque la TLB es una copia de lo que hay en el directorio y las tablas de páginas, y el hardware no la mantiene coherente automáticamente con esas estructuras en memoria. Si el kernel modifica un PDE o PTE (cambia el marco físico, saca el bit de presente, cambia permisos, etc.), la TLB puede seguir teniendo la traducción vieja y la CPU la va a seguir usando:
+
+    Accedés a una página que ya desmapeaste → la TLB todavía la traduce.
+    Cambiás los permisos a solo lectura → la TLB sigue permitiendo escritura.
+    Remapeás una página a otro marco → seguís escribiendo en el marco anterior.
+
+    Por eso, después de tocar las estructuras hay que invalidar:
+
+    invlpg <dir>: invalida la entrada de una dirección virtual puntual.
+    Recargar CR3 (mov cr3, ...): purga (casi) toda la TLB. Es lo que pasa también en un cambio de espacio de direcciones (cambio de proceso), porque las traducciones de un proceso no valen para el otro. (Las entradas globales, bit G, pueden sobrevivir al recargar CR3, típicamente las del kernel.)
+    ¿Qué atributos tiene cada entrada de la TLB?
+
+    Cada entrada guarda básicamente:
+
+    La página virtual (el tag, usado para matchear).
+    El marco físico (la dirección base física de la página).
+    Los atributos de la PTE/PDE: bit de presente, R/W (lectura/escritura), U/S (usuario/supervisor), bits de accessed (A) y dirty (D), y otros como PWT/PCD (política de caché) y G (global).
+
+    Una entrada de la TLB es, en esencia, una copia de la entrada de la tabla de páginas más el tag de la dirección virtual. (En arquitecturas modernas se suman identificadores de espacio de direcciones, como PCID, pero eso no es necesario para el TP.)
+
+    Al desalojar una entrada de la TLB, ¿se afecta la tabla original?
+
+    Depende del bit dirty (y del accessed).
+
+    En general, desalojar una entrada no modifica la tabla original: simplemente se descarta la copia, porque la tabla de páginas es la fuente de verdad.
+    La excepción son los bits A y D: esos los actualiza el hardware. El bit accessed se setea en la PTE cuando se usa la traducción, y el bit dirty se setea en la PTE cuando se hace una escritura a la página. Si la TLB mantiene esos bits en la entrada cacheada, la información de modificación tiene que terminar reflejada en la PTE. En el caso de x86, el procesador escribe el bit D (y A) en la PTE en memoria en el momento en que se produce el acceso/la escritura que lo requiere, así que al desalojar la entrada no queda nada pendiente por “bajar” en la práctica. Conceptualmente, la respuesta esperada es: sí, en el caso de los bits A/D, la información tiene que reflejarse en la entrada original de la tabla; en todo lo demás el desalojo simplemente descarta la copia sin afectar la 
+    tabla.
+
+
+parte 4 tareas
