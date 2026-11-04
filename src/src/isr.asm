@@ -206,7 +206,7 @@ _isr33:
     xor eax, eax
     in al, 0x60 ; leo el scan code del teclado
     push eax ;lo pongo en la pila porque asi lo lee la funcion 
-    call process_scancode
+    call tasks_input_process
     add esp, 4 ;borramos la lectura
 
     popad

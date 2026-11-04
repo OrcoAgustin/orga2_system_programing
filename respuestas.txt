@@ -301,3 +301,120 @@ Hay un detalle con R/W: lo anterior vale para accesos de usuario. Para accesos e
 
 
 parte 4 tareas
+1
+    1. Estructuras nuevas que necesitás
+
+    Una entrada en la GDT por cada tarea, de tipo TSS descriptor. Cada tarea tiene su TSS (Task State Segment), y la GDT necesita un descriptor que apunte a cada una.
+    Una TSS por tarea (2 TSS). Ahí se guarda el contexto de la tarea cuando no está corriendo: registros generales, EIP, EFLAGS, selectores de segmento, CR3, y la pila de nivel 0 (ESP0/SS0).
+    Un directorio de páginas propio por tarea (2 page directories). Es lo que hace que cada tarea vea su propia memoria. Su dirección física va en el CR3 guardado en la TSS.
+    Sus page tables correspondientes (las que hagan falta para mapear código, datos y pila de cada tarea).
+    Una TSS extra para la tarea inicial, y otra para la tarea idle si el esquema lo pide, porque el procesador necesita un lugar donde guardar el contexto de “quien venía corriendo” cuando hacés el primer salto a una tarea. Ojo: depende de cómo lo plantee tu cátedra, fijate en el enunciado si piden tarea inicial/idle.
+
+    2. Entradas nuevas en estructuras ya definidas
+
+    GDT: las entradas de TSS mencionadas arriba (2 para las tareas, más 1 o 2 si están la inicial y la idle). Además, si no los tenías, los segmentos de código y datos de nivel 3 para las tareas de usuario.
+    IDT: una entrada para la interrupción del reloj (el timer), que es la que dispara el scheduler, y una para la syscall si las tareas la usan. Si ya las tenías definidas, no se agrega nada nuevo.
+
+    3. Registros a configurar
+
+    TR (Task Register): hay que cargarlo con el selector de la TSS de la tarea inicial (ltr). Sin eso no se puede hacer el primer cambio de tarea.
+    CR3: cambia con cada tarea (se carga desde la TSS al saltar), apuntando al directorio de páginas de la tarea que entra.
+    Los registros de la PIC/PIT para que el reloj interrumpa periódicamente (si el scheduler es por tiempo).
+
+    4. Formato y dónde están almacenadas
+
+    GDT: tabla en memoria (la dirección y el tamaño están en el registro GDTR). Cada entrada es un descriptor de 8 bytes. Para una TSS: base (dirección de la TSS), límite (0x67 como mínimo, 104 bytes), tipo 1001 (TSS disponible), bit S = 0, DPL, bit P.
+    TSS: estructura de 104 bytes en memoria (la base está guardada en su descriptor de la GDT). Tiene los campos que te nombré arriba.
+    Page directory / page tables: en memoria física, páginas de 4 KB con entradas de 4 bytes (dirección base + bits de present, read/write, user/supervisor). El CR3 apunta al directorio.
+    TR: registro del procesador que guarda el selector (índice en la GDT) de la TSS actual.
+
+
+2.
+    Qué es y cuándo se produce
+
+    Cambio de contexto es sacar de ejecución una tarea guardando su estado, y poner a correr otra restaurando el suyo. En nuestro sistema se produce cuando interrumpe el reloj y el scheduler decide pasar a la siguiente tarea. También puede pasar cuando una tarea termina o se desaloja.
+
+    Efecto sobre los registros
+
+    Cambia todo el estado arquitectural de la tarea:
+
+    Registros generales (EAX, EBX, ..., ESP, EBP).
+    EIP y EFLAGS.
+    Selectores de segmento.
+    CR3, o sea el espacio de direcciones. Esto es clave: no es solo guardar registros, también cambia la paginación.
+
+    Dónde se guarda el estado
+
+    Con pushear a la pila vas bien. La pila es una opción válida: cada tarea tiene la suya, y guardar el contexto ahí funciona muy bien (es lo que hace un kernel típico). La otra opción es guardarlo en una estructura en memoria.
+
+    Qué mecanismo da el procesador
+
+    El procesador ofrece el cambio de tarea por hardware, basado en la TSS. Si hacés un jmp far (o call, o una interrupción por task gate) a un selector de TSS, el procesador guarda solo el estado de la tarea actual en su TSS, carga el estado de la nueva desde la otra TSS, y actualiza TR.
+
+    Qué vamos a usar en su lugar
+
+    Por lo que plantea la pregunta (“en su lugar”), usamos un cambio de contexto por software: lo hacemos nosotros en código del kernel. La idea es guardar los registros de la tarea saliente (en su pila o en una estructura), cambiar CR3 y ESP a los de la tarea entrante, y restaurar sus registros. Del mecanismo por hardware solo seguimos usando la TSS para una cosa: guardar ESP0/SS0, la pila de nivel 0 a la que el procesador salta cuando una tarea de usuario es interrumpida.
+
+3.
+    ¿Por qué cargar TR si no usamos el cambio por hardware?
+
+    Porque el procesador lo sigue consultando por otro motivo: cuando una tarea de nivel 3 es interrumpida (reloj, syscall, excepción), el procesador pasa a nivel 0 y necesita una pila de nivel 0. Esa pila la saca de la TSS apuntada por TR: carga SS0:ESP0 y ahí empieza a pushear (SS, ESP, EFLAGS, CS, EIP de la tarea interrumpida).
+
+    Si TR no está cargado con un selector válido, la primera interrupción que venga desde nivel 3 explota (falla y, como la falla también necesita pila, termina en triple fault). Por eso:
+
+    Cargamos TR una sola vez con ltr, apuntando al descriptor de TSS en la GDT.
+    Esa TSS es una sola, y de ella usamos casi exclusivamente SS0/ESP0.
+    En cada cambio de contexto hay que actualizar ESP0 en esa TSS para que apunte a la pila de nivel 0 de la tarea que entra. Si no, la próxima interrupción pisaría la pila de otra tarea.
+
+    ¿Qué pasa si no hay tareas para ejecutar o están todas suspendidas?
+
+    El scheduler no puede quedarse sin nada a qué saltar. La solución es una tarea idle:
+
+    Siempre está disponible: el scheduler la elige cuando no hay ninguna tarea viva/ejecutable. Nunca se suspende ni se desaloja.
+    Tiene su propio contexto (pila, y su directorio de páginas o el del kernel). Normalmente corre en nivel 0.
+    Su código es un loop que no hace nada útil, típicamente hlt dentro de un jmp/loop, para no quemar CPU.
+    Las interrupciones tienen que estar habilitadas (sti) cuando corre. Si hacés hlt con IF=0, el procesador queda colgado para siempre, porque nada lo despierta. Con IF=1, el próximo tick del reloj lo despierta, el scheduler revisa si alguna tarea volvió a estar ejecutable y, si no, vuelve a idle.
+
+4.
+    ¿Qué hace el scheduler?
+
+    Es el componente del SO que decide qué tarea corre en el procesador y por cuánto tiempo. Con una sola CPU (o menos CPUs que tareas) las tareas compiten por ella, y el scheduler arbitra esa competencia:
+
+    Elige, entre las tareas listas para ejecutar, cuál es la siguiente.
+    Dispara el cambio de contexto cuando corresponde (en nuestro TP, en cada tick del reloj).
+    Sabe cuándo no hay nadie para correr y manda a la idle.
+    Lleva el control del estado de cada tarea (corriendo, lista, suspendida/bloqueada, terminada).
+
+    Así se logra la ilusión de que varias tareas corren “a la vez” y se reparte el uso de la CPU.
+
+    ¿A qué nos referimos con que usa una política?
+
+    Hay que separar mecanismo de política:
+
+    Mecanismo: el cómo. Guardar el contexto, cambiar CR3, actualizar ESP0, saltar a la otra tarea. Eso es siempre lo mismo.
+    Política: el criterio para decidir a quién le toca y cuánto corre. Es la regla de decisión del scheduler.
+
+    Ejemplos de políticas:
+
+    Round Robin: se recorren las tareas en orden circular, cada una con el mismo quantum (es la más simple y la que suele usarse en el TP).
+    Por prioridades: corre la de mayor prioridad que esté lista.
+    FIFO / FCFS: se ejecutan en orden de llegada hasta que terminan.
+    SJF: primero la de menor tiempo estima
+
+5.
+    La idea: multiplexación en el tiempo (time-sharing)
+
+    La CPU ejecuta una sola tarea por vez, pero el SO la va alternando entre las tareas tan rápido que, a escala humana, parece que corren todas a la vez.
+
+    Cómo se logra
+
+    Interrupción del reloj (timer): un temporizador (el PIT) interrumpe a la CPU periódicamente, cada pocos milisegundos. Cada tarea corre durante un quantum de tiempo.
+    El scheduler toma el control: al llegar la interrupción, el procesador pasa a nivel 0 y salta al handler del reloj, que llama al scheduler. Ahí la tarea no tiene forma de negarse: es desalojo (preemption), el SO le quita la CPU sin que la tarea coopere.
+    Cambio de contexto: se guarda el estado de la tarea saliente (registros, EIP, EFLAGS, etc.), se carga el de la entrante, incluyendo su CR3, y se retoma justo donde esa tarea había quedado.
+    Repetir: cada tarea avanza un poquito en cada turno.
+
+    Por qué parece simultáneo
+
+    Cada tarea guarda y recupera su estado completo, así que “no se entera” de que fue pausada: para ella la ejecución es continua. Y como los quantums son cortos y los cambios son rápidos, desde afuera se ve progreso en todas al mismo tiempo. Pero paralelismo real (ejecución literalmente simultánea) solo existiría con varias CPUs o núcleos; acá es concurrencia.
+
+    Para la respuesta del TP, con esto alcanza: time-sharing + interrupción del reloj + scheduler + cambio de contexto = ilusión de simultaneidad.

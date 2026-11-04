@@ -11,6 +11,7 @@ extern pic_reset
 extern pic_enable
 extern mmu_init_kernel_dir  
 extern mmu_init_task_dir
+extern tss_init
 
 
 ;extern test_copy_page
@@ -170,6 +171,9 @@ modo_protegido:
     mov eax, cr0
     or  eax, 0x80000000          ; bit 31 (PG) = 1 -> activa paginación
     mov cr0, eax
+
+    ;agregamos a la gdt el desccriptor de tss
+    call tss_init
 
     ;prueba de copy page
     ;call test_copy_page
