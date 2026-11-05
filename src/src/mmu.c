@@ -53,7 +53,7 @@ void mmu_init(void) {}
  * Las páginas se obtienen en forma incremental, siendo la primera: next_free_kernel_page
  * @return devuelve la dirección de memoria de comienzo de la próxima página libre de kernel
  */
-paddr_t mmu_next_free_kernel_page(void) {
+  paddr_t mmu_next_free_kernel_page(void) {
   paddr_t page = next_free_kernel_page;
   next_free_kernel_page += PAGE_SIZE;
   return page;

@@ -18,7 +18,7 @@ extern tss_init
 
 %define C_FG_GREEN 0x2
 %define KERNEL_STACK 0x00025000
-
+%define TASK_INITIAL_SEL (11 << 3)
 %include "print.mac"
 
 global start
@@ -175,6 +175,8 @@ modo_protegido:
     ;agregamos a la gdt el desccriptor de tss
     call tss_init
 
+    mov ax, TASK_INITIAL_SEL
+    ltr ax
     ;prueba de copy page
     ;call test_copy_page
 
