@@ -9,26 +9,24 @@ extern idt_init
 extern IDT_DESC
 extern pic_reset
 extern pic_enable
-extern mmu_init_kernel_dir  
+extern mmu_init_kernel_dir
 extern mmu_init_task_dir
 extern tss_init
-
+extern tasks_init               ; verificar el nombre exacto en tasks.c
+extern switch_to_usermode       ; definida en isr.asm (con "global" alla)
 
 ;extern test_copy_page
 
 %define C_FG_GREEN 0x2
 %define KERNEL_STACK 0x00025000
 %define TASK_INITIAL_SEL (11 << 3)
+%define IDLE_PHYS_ADDR 0x00018000   ; verificar contra defines.h
 %include "print.mac"
 
 global start
 
-
-; COMPLETAR - Agreguen declaraciones extern según vayan necesitando
-
-; COMPLETAR - Definan correctamente estas constantes cuando las necesiten
-%define CS_RING_0_SEL (1 << 3)   
-%define DS_RING_0_SEL (3 << 3)   
+%define CS_RING_0_SEL (1 << 3)
+%define DS_RING_0_SEL (3 << 3)
 
 
 BITS 16
@@ -45,7 +43,7 @@ start_pm_msg db     'Iniciando kernel en Modo Protegido'
 start_pm_len equ    $ - start_pm_msg
 
 ;;
-;; Seccion de código.
+;; Seccion de codigo.
 ;; -------------------------------------------------------------------------- ;;
 
 ;; Punto de entrada del kernel.
@@ -55,8 +53,7 @@ start:
     ; ||  Salto a modo protegido  ||
     ; ==============================
 
-    ; COMPLETADO- Deshabilitar interrupciones (Parte 1: Pasaje a modo protegido)
-    Cli 
+    cli
 
     ; Cambiar modo de video a 80 X 50
     mov ax, 0003h
@@ -65,43 +62,21 @@ start:
     mov ax, 1112h
     int 10h ; load 8x8 font
 
-    ; COMPLETADO - Imprimir mensaje de bienvenida - MODO REAL (Parte 1: Pasaje a modo protegido)
-    ; (revisar las funciones definidas en print.mac y los mensajes se encuentran en la
-    ; sección de datos)
-    print_text_rm start_rm_msg, start_rm_len,C_FG_GREEN,0,0 
+    print_text_rm start_rm_msg, start_rm_len, C_FG_GREEN, 0, 0
 
+    call A20_enable
 
-    ; COMPLETADO - Habilitar A20 (Parte 1: Pasaje a modo protegido)
-    ; (revisar las funciones definidas en a20.asm)
-    Call A20_enable
+    lgdt [GDT_DESC]
 
-    ; COMPLETADO - los defines para la GDT en defines.h y las entradas de la GDT en gdt.c
-    ; COMPLETADO - Cargar la GDT (Parte 1: Pasaje a modo protegido)
-    
-    lgdt[GDT_DESC]
-
-    ; COMPLETADO - Setear el bit PE del registro CR0 (Parte 1: Pasaje a modo protegido)
-    
     mov eax, cr0
-    or  eax, 1          
+    or  eax, 1
     mov cr0, eax
-    
-    ; COMPLETADO - Saltar a modo protegido (far jump) (Parte 1: Pasaje a modo protegido)
-    ; (recuerden que un far jmp se especifica como jmp CS_selector:address)
-    ; Pueden usar la constante CS_RING_0_SEL definida en este archivo
 
     jmp CS_RING_0_SEL:modo_protegido
-    
-   
+
 
 BITS 32
 modo_protegido:
-    ; COMPLETAR (Parte 1: Pasaje a modo protegido) - A partir de aca, todo el codigo se va a ejectutar en modo protegido
-    ; Establecer selectores de segmentos DS, ES, GS, FS y SS en el segmento de datos de nivel 0
-    ; Pueden usar la constante DS_RING_0_SEL definida en este archivo
-
-
-    ;arranca todo en el valor de 11 shifteado 3 a la izq
     mov ax, DS_RING_0_SEL
     mov ds, ax
     mov es, ax
@@ -109,127 +84,81 @@ modo_protegido:
     mov fs, ax
     mov ss, ax
 
-
-    ; COMPLETAR - Establecer el tope y la base de la pila (Parte 1: Pasaje a modo protegido)
     mov esp, KERNEL_STACK
-    mov ebp, esp        
+    mov ebp, esp
 
-    ; COMPLETAR - Imprimir mensaje de bienvenida - MODO PROTEGIDO (Parte 1: Pasaje a modo protegido)
-    print_text_pm start_pm_msg, start_pm_len,C_FG_GREEN,0,0
+    print_text_pm start_pm_msg, start_pm_len, C_FG_GREEN, 0, 0
 
     call screen_draw_layout
-    ; COMPLETAR - Inicializar pantalla (Parte 1: Pasaje a modo protegido)
-    
-    ; ===================================
-    ; ||     (Parte 3: Paginación)     ||
-    ; ===================================
-
-    ; COMPLETADO - los defines para la MMU en defines.h
-    ; COMPLETADO - las funciones en mmu.c
-    ; COMPLETAR - reemplazar la implementacion de la interrupcion 88 (ver comentarios en isr.asm)
-    ; COMPLETAR - La rutina de atención del page fault en isr.asm
-    ; COMPLETAR - Inicializar el directorio de paginas
-
-    ; COMPLETAR - Cargar directorio de paginas 
-
-    ; COMPLETAR - Habilitar paginacion 
-
-    ; ========================
-    ; ||  (Parte 4: Tareas) ||
-    ; ========================
-
-    ; COMPLETAR - reemplazar la implementacion de la interrupcion 88 (ver comentarios en isr.asm)
-    ; COMPLETAR - las funciones en tss.c
-    ; COMPLETAR - Inicializar tss
-
-    ; COMPLETAR - Inicializar el scheduler
-
-    ; COMPLETAR - Inicializar las tareas
-
 
     ; ===================================
     ; ||   (Parte 2: Interrupciones)   ||
     ; ===================================
 
-    ; COMPLETADO - las funciones en idt.c
-
-    ; COMPLETADO- Inicializar y cargar la IDT
-
     call idt_init
     lidt [IDT_DESC]
-
-    ; COMPLETADO- Reiniciar y habilitar el controlador de interrupciones (ver pic.c)
 
     call pic_reset
     call pic_enable
 
-    ;habilitamos paginacion
-    call mmu_init_kernel_dir     ; arma directorio y tabla, devuelve en EAX la dir. del directorio (0x25000)
+    ; ===================================
+    ; ||     (Parte 3: Paginacion)     ||
+    ; ===================================
 
-    mov cr3, eax                 ; CR3 = dirección física del directorio de páginas
+    call mmu_init_kernel_dir     ; devuelve en EAX la dir. del directorio (0x25000)
+    mov cr3, eax                 ; CR3 = dir. fisica del directorio de paginas
 
     mov eax, cr0
-    or  eax, 0x80000000          ; bit 31 (PG) = 1 -> activa paginación
+    or  eax, 0x80000000          ; bit 31 (PG) = 1 -> activa paginacion
     mov cr0, eax
 
-    ;agregamos a la gdt el desccriptor de tss
-    call tss_init
-
-    mov ax, TASK_INITIAL_SEL
-    ltr ax
     ;prueba de copy page
     ;call test_copy_page
 
-    ; mapa de memoria de una tarea ficticia ---
-    push 0x18000
-    call mmu_init_task_dir
-    add esp, 4
-    mov ebx, eax                     ; ebx = cr3 de la tarea
-
-    mov eax, cr3
-    push eax                         ; guardo el cr3 del kernel en la pila
-
-    mov cr3, ebx                     ; <-- breakpoint 1: info page (mapa de la tarea)
-
-    mov dword [0x07000000], 0x1234   ; 1ra escritura: page fault -> se mapea
-    mov dword [0x07000004], 0x5678   ; 2da escritura: ya está mapeada, sin mensaje
-
-    pop eax
-    mov cr3, eax
-
-    sti 
-
-    ; COMPLETADO - Rutinas de atención de reloj, teclado, e interrupciones 88 y 89 (en isr.asm)
-
-    mov eax,0
-    int 88
-
-    ; COMPLETAR (Parte 4: Tareas)- Cargar tarea inicial
-
-    ; COMPLETAR - Habilitar interrupciones (!! en etapas posteriores, evaluar si se debe comentar este código !!)
-    
-    ; NOTA: Pueden chequear que las interrupciones funcionen forzando a que se
-    ;       dispare alguna excepción (lo más sencillo es usar la instrucción
-    ;       `int3`)
-    ;int3
-
-    ; COMPLETAR - Probar Sys_call (para etapas posteriores, comentar este código)
-
-    ; COMPLETAR - Probar generar una excepción (para etapas posteriores, comentar este código)
-    
     ; ========================
     ; ||  (Parte 4: Tareas)  ||
     ; ========================
-    
-    ; COMPLETAR - Inicializar el directorio de paginas de la tarea de prueba
 
-    ; COMPLETAR - Cargar directorio de paginas de la tarea
+    ; Descriptores de TSS en la GDT
+    call tss_init
+    mov ax, TASK_INITIAL_SEL
+    ltr ax
 
-    ; COMPLETAR - Restaurar directorio de paginas del kernel
+    call tasks_init          ; crea idle (tasks[0]) y las demas, con sus cr3
 
-    ; COMPLETAR - Saltar a la primera tarea: Idle
+    call switch_to_usermode  ; sin argumentos, lee tasks[0]
 
-    ; Ciclar infinitamente 
+    ; ---- Prueba de la tarea ficticia (comentada, ya cumplio su funcion) ----
+    ;push 0x18000
+    ;call mmu_init_task_dir
+    ;add esp, 4
+    ;mov ebx, eax                    ; ebx = cr3 de la tarea
+    ;mov eax, cr3
+    ;push eax                        ; guardo el cr3 del kernel
+    ;mov cr3, ebx                    ; breakpoint: info page
+    ;mov dword [0x07000000], 0x1234  ; 1ra escritura: page fault -> se mapea
+    ;mov dword [0x07000004], 0x5678  ; 2da escritura: ya mapeada
+    ;pop eax
+    ;mov cr3, eax
+
+    ; ---- Prueba de la int 88 (comentada) ----
+    ;mov eax, 0
+    ;int 88
+
+    ; ---- Prueba de excepcion (comentada) ----
+    ;int3
+
+    ; Directorio de paginas de la tarea Idle
+    push IDLE_PHYS_ADDR
+    call mmu_init_task_dir
+    add esp, 4                   ; EAX = cr3 de la idle
+
+    ; Saltar a la Idle en ring 3 (carga cr3, arma la pila y hace iret).
+    ; El iret deja IF=1, por eso no hace falta un sti antes.
+    push eax
+    call switch_to_usermode      ; no vuelve
+
+    ; Red de seguridad: nunca deberia llegar aca
     mov eax, 0xFFFF
     mov ebx, 0xFFFF
     mov ecx, 0xFFFF

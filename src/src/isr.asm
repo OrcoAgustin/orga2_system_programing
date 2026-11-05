@@ -6,9 +6,30 @@
 ; Definicion de rutinas de atencion de interrupciones
 
 %include "print.mac"
-%define CS_RING_0_SEL    (1 << 3)
 
-%define SHARED_TICK_COUNT 0x1D000
+%define CS_RING_0_SEL    (1 << 3)
+%define CS_RING_3_SEL ((2 << 3) | 3)   ; 0x13
+%define DS_RING_3_SEL ((4 << 3) | 3)   ; 0x23
+%define SHARED_TICK_COUNT 0x1D000 
+
+
+
+
+;definicion para la creacion de tarea
+; Offsets dentro de task_t: completar mirando la struct en tasks.h
+
+%define OFF_EAX     4
+%define OFF_EBX     8
+%define OFF_ECX     12
+%define OFF_EDX     16
+%define OFF_ESI     20
+%define OFF_EDI     24
+%define OFF_ESP     28
+%define OFF_EBP     32
+%define OFF_EIP     36
+%define OFF_EFLAGS  40
+%define OFF_CR3     44
+
 BITS 32
 
 sched_task_offset:     dd 0xFFFFFFFF
@@ -263,3 +284,35 @@ next_clock:
                 print_text_pm ebx, 1, 0x0f, 49, 79
                 popad
         ret
+
+
+
+
+; void switch_to_usermode(uint32_t cr3_idle)
+global switch_to_usermode
+switch_to_usermode:
+    mov esi, tasks                  ; esi -> tasks[0] (la idle)
+
+    mov eax, [esi + OFF_CR3]
+    mov cr3, eax
+
+    mov ax, DS_RING_3_SEL
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+
+    push DS_RING_3_SEL              ; SS
+    push dword [esi + OFF_ESP]      ; ESP de usuario
+    push dword [esi + OFF_EFLAGS]   ; EFLAGS (con IF=1)
+    push CS_RING_3_SEL              ; CS
+    push dword [esi + OFF_EIP]      ; EIP
+
+    mov eax, [esi + OFF_EAX]
+    mov ebx, [esi + OFF_EBX]
+    mov ecx, [esi + OFF_ECX]
+    mov edx, [esi + OFF_EDX]
+    mov edi, [esi + OFF_EDI]
+    mov ebp, [esi + OFF_EBP]
+    mov esi, [esi + OFF_ESI]        ; esi al final, es el puntero a la ficha
+    iret

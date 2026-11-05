@@ -127,16 +127,7 @@ b)  ¿Cómo se traduce una dirección lógica en una dirección física? ¿Cómo
 
 c)  ¿Cuál es el efecto de los siguientes atributos en las entradas de la
     tabla de página?
-
-  - `D`
-  - `A`
-  - `PCD`
-  - `PWT`
-  - `U/S`
-  - `R/W`
-  - `P`
-
-
+    
 d)  ¿Qué sucede si los atributos U/S y R/W del directorio y de la tabla
     de páginas difieren? ¿Cuáles terminan siendo los atributos de una
     página determinada en ese caso? Hint: buscar la tabla *Combined
